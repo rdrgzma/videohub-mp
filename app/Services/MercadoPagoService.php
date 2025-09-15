@@ -21,7 +21,7 @@ class MercadoPagoService
     public function __construct()
     {
         MercadoPagoConfig::setAccessToken(env('MERCADO_PAGO_ACCESS_TOKEN'));
-        MercadoPagoConfig::setRuntimeEnviroment("LOCAL");
+        MercadoPagoConfig::setRuntimeEnviroment('LOCAL');
 
         $this->paymentClient = new PaymentClient();
         $this->preferenceClient = new PreferenceClient();
