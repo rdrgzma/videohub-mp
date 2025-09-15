@@ -21,7 +21,8 @@ class MercadoPagoService
     public function __construct()
     {
         MercadoPagoConfig::setAccessToken(env('MERCADO_PAGO_ACCESS_TOKEN'));
-        MercadoPagoConfig::setRuntimeEnviroment('LOCAL');
+      //  MercadoPagoConfig::setRuntimeEnviroment('LOCAL');
+        MercadoPagoConfig::setRuntimeEnviroment(MercadoPagoConfig::LOCAL);
 
         $this->paymentClient = new PaymentClient();
         $this->preferenceClient = new PreferenceClient();
@@ -35,7 +36,6 @@ class MercadoPagoService
         try {
             $payment = $this->paymentClient->create([
                 "transaction_amount" => (float) $plan->price,
-                "payment_method_id" => "visa", // ou detectar automaticamente
                 "payer" => [
                     "email" => $user->email,
                     "identification" => [
@@ -87,7 +87,7 @@ class MercadoPagoService
                     "last_name" => implode(' ', array_slice(explode(' ', $user->name), 1)) ?: explode(' ', $user->name)[0],
                     "identification" => [
                         "type" => "CPF",
-                        "number" => "11111111111" // Implementar campo CPF no User
+                        "number" => $user->cpf ?? "11111111111" // Implementar campo CPF no User
                     ]
                 ],
                 "description" => "Assinatura {$plan->name} - VideoHub",
