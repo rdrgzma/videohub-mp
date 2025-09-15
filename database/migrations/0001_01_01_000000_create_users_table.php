@@ -15,6 +15,7 @@ return new class extends Migration
             $table->id();
             $table->string('name');
             $table->string('email')->unique();
+            $table->string('cpf', 11)->nullable()->after('email');
             $table->timestamp('email_verified_at')->nullable();
             $table->string('password');
             $table->foreignId('current_plan_id')->nullable()->constrained('plans')->onDelete('set null');
@@ -27,6 +28,7 @@ return new class extends Migration
             $table->boolean('is_active')->default(true);
             $table->rememberToken();
             $table->timestamps();
+            $table->index('cpf');
         });
 
         Schema::create('password_reset_tokens', function (Blueprint $table) {

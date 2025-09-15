@@ -14,8 +14,10 @@ return new class extends Migration
             $table->decimal('amount_paid', 10, 2);
             $table->enum('payment_method', ['credit_card', 'pix', 'boleto']);
             $table->enum('status', ['pending', 'active', 'cancelled', 'expired'])->default('pending');
-            $table->timestamp('starts_at');
-            $table->timestamp('expires_at');
+            $table->timestamp('starts_at')->nullable();
+            $table->timestamp('ends_at')->nullable()->comment('Usado para pagamentos únicos como Pix');
+            $table->timestamp('expires_at')->nullable();
+            $table->string('mercadopago_subscription_id')->nullable()->comment('Assinatura recorrente do MP');
             $table->timestamp('cancelled_at')->nullable();
             $table->string('payment_reference')->nullable();
             $table->json('payment_data')->nullable();

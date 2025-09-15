@@ -1,160 +1,204 @@
 <?php
+
 namespace App\Http\Controllers;
 
 use App\Models\Plan;
 use App\Models\Subscription;
 use App\Models\ActivityLog;
+use App\Services\MercadoPagoService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class SubscriptionController extends Controller
 {
-// REMOVER o __construct() com middleware
+    private MercadoPagoService $mercadoPagoService;
 
-public function checkout(Plan $plan)
-{
-// Verificar se usuário está logado
-if (!Auth::check()) {
-return redirect()->route('login');
-}
+    public function __construct(MercadoPagoService $mercadoPagoService)
+    {
+        $this->mercadoPagoService = $mercadoPagoService;
+    }
 
-// Verificar se usuário já tem plano ativo
-if (Auth::user()->hasActivePlan()) {
-return redirect()->route('profile.index')
-->with('info', 'Você já possui um plano ativo.');
-}
+    public function checkout(Plan $plan)
+    {
+        if (!Auth::check()) {
+            return redirect()->route('login');
+        }
 
-return view('subscriptions.checkout', compact('plan'));
-}
+        if (Auth::user()->hasActivePlan()) {
+            return redirect()->route('profile.index')
+                ->with('info', 'Você já possui um plano ativo.');
+        }
 
-public function process(Request $request, Plan $plan)
-{
-if (!Auth::check()) {
-return redirect()->route('login');
-}
+        return view('subscriptions.checkout_bkp', compact('plan'));
+    }
 
-$request->validate([
-'payment_method' => 'required|in:credit_card,pix',
-'card_name' => 'required_if:payment_method,credit_card|string|max:255',
-'card_number' => 'required_if:payment_method,credit_card|string',
-'card_expiry' => 'required_if:payment_method,credit_card|string',
-'card_cvv' => 'required_if:payment_method,credit_card|string',
-]);
+    public function process(Request $request, Plan $plan)
+    {
+        if (!Auth::check()) {
+            return redirect()->route('login');
+        }
 
-try {
-DB::beginTransaction();
+        $validationRules = [
+            'payment_method' => 'required|in:credit_card,pix',
+        ];
 
-// Simular processamento de pagamento
-$paymentReference = 'PAY_' . time() . '_' . uniqid();
-$paymentData = [];
+        // Validações específicas para cartão de crédito
+        if ($request->payment_method === 'credit_card') {
+            $validationRules = array_merge($validationRules, [
+                'card_token' => 'required|string',
+                'cpf' => 'required|string|size:11',
+                'card_holder_name' => 'required|string|max:255',
+            ]);
+        }
 
-if ($request->payment_method === 'credit_card') {
-// Simular processamento de cartão
-$paymentData = [
-'card_last_four' => substr($request->card_number, -4),
-'card_brand' => $this->detectCardBrand($request->card_number),
-];
-} elseif ($request->payment_method === 'pix') {
-// Simular PIX
-$paymentData = [
-'pix_key' => 'pix@videohub.com.br',
-'qr_code' => 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
-];
-}
+        $request->validate($validationRules);
 
-// Criar assinatura
-$subscription = Subscription::create([
-'user_id' => Auth::id(),
-'plan_id' => $plan->id,
-'amount_paid' => $plan->price,
-'payment_method' => $request->payment_method,
-'status' => $request->payment_method === 'pix' ? 'pending' : 'active',
-'starts_at' => now(),
-'expires_at' => now()->addMonths($plan->duration_months),
-'payment_reference' => $paymentReference,
-'payment_data' => $paymentData,
-]);
+        try {
+            DB::beginTransaction();
 
-// Ativar assinatura se não for PIX
-if ($request->payment_method === 'credit_card') {
-$subscription->activate();
-}
+            $user = Auth::user();
+            $externalReference = "VIDEOHUB_P{$plan->id}_U{$user->id}_" . uniqid();
 
-// Log da atividade
-ActivityLog::log(
-'subscription_created',
-"Assinatura criada para o plano: {$plan->name}",
-Auth::user(),
-[
-'plan_id' => $plan->id,
-'subscription_id' => $subscription->id,
-'payment_method' => $request->payment_method,
-'amount' => $plan->price,
-]
-);
+            // Criar assinatura pendente
+            $subscription = Subscription::create([
+                'user_id' => $user->id,
+                'plan_id' => $plan->id,
+                'amount_paid' => $plan->price,
+                'payment_method' => $request->payment_method,
+                'status' => 'pending',
+                'starts_at' => now(),
+                'expires_at' => now()->addMonths($plan->duration_months),
+                'payment_reference' => $externalReference,
+                'payment_data' => [],
+            ]);
 
-DB::commit();
+            // Processar pagamento no Mercado Pago
+            if ($request->payment_method === 'credit_card') {
+                $result = $this->mercadoPagoService->processCreditCardPayment([
+                    'token' => $request->card_token,
+                    'cpf' => $request->cpf,
+                    'card_holder_name' => $request->card_holder_name,
+                ], $plan, $user);
+            } else {
+                $result = $this->mercadoPagoService->processPixPayment($plan, $user);
+            }
 
-if ($request->payment_method === 'pix') {
-return view('subscriptions.pix-payment', compact('subscription', 'plan'));
-}
+            if (!$result['success']) {
+                DB::rollBack();
+                return back()->with('error', 'Erro ao processar pagamento: ' . $result['error']);
+            }
 
-return redirect()->route('subscription.success', $subscription);
+            // Atualizar assinatura com dados do pagamento
+            $subscription->update([
+                'payment_data' => [
+                    'mp_payment_id' => $result['payment_id'],
+                    'mp_status' => $result['status'],
+                    'payment_method' => $request->payment_method,
+                    'qr_code' => $result['qr_code'] ?? null,
+                    'qr_code_base64' => $result['qr_code_base64'] ?? null,
+                ]
+            ]);
 
-} catch (\Exception $e) {
-DB::rollBack();
+            // Se cartão foi aprovado imediatamente, ativar assinatura
+            if ($request->payment_method === 'credit_card' && $result['status'] === 'approved') {
+                $subscription->activate();
+                $subscription->update(['status' => 'active']);
+            }
 
-return back()->with('error', 'Erro ao processar pagamento. Tente novamente.');
-}
-}
+            // Log da atividade
+            ActivityLog::log(
+                'subscription_created',
+                "Assinatura criada para o plano: {$plan->name}",
+                $user,
+                [
+                    'plan_id' => $plan->id,
+                    'subscription_id' => $subscription->id,
+                    'payment_method' => $request->payment_method,
+                    'amount' => $plan->price,
+                    'mp_payment_id' => $result['payment_id'],
+                    'mp_status' => $result['status'],
+                ]
+            );
 
-public function success(Subscription $subscription)
-{
-if (!Auth::check() || $subscription->user_id !== Auth::id()) {
-abort(403);
-}
+            DB::commit();
 
-return view('subscriptions.success', compact('subscription'));
-}
+            // Redirecionar baseado no método de pagamento
+            if ($request->payment_method === 'pix') {
+                return view('subscriptions.pix-payment', compact('subscription', 'plan'));
+            }
 
-public function confirmPix(Subscription $subscription)
-{
-if (!Auth::check() || $subscription->user_id !== Auth::id()) {
-abort(403);
-}
+            return redirect()->route('subscription.success', $subscription);
 
-if ($subscription->status !== 'pending') {
-return redirect()->route('profile.index')
-->with('info', 'Esta assinatura já foi processada.');
-}
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Subscription Process Error: ' . $e->getMessage(), [
+                'plan_id' => $plan->id,
+                'user_id' => Auth::id(),
+                'payment_method' => $request->payment_method,
+            ]);
 
-// Simular confirmação do PIX
-$subscription->activate();
+            return back()->with('error', 'Erro interno. Tente novamente em alguns minutos.');
+        }
+    }
 
-ActivityLog::log(
-'pix_payment_confirmed',
-"Pagamento PIX confirmado para assinatura #{$subscription->id}",
-Auth::user(),
-['subscription_id' => $subscription->id]
-);
+    public function success(Subscription $subscription)
+    {
+        if (!Auth::check() || $subscription->user_id !== Auth::id()) {
+            abort(403);
+        }
 
-return redirect()->route('subscription.success', $subscription)
-->with('success', 'Pagamento PIX confirmado com sucesso!');
-}
+        return view('subscriptions.success', compact('subscription'));
+    }
 
-private function detectCardBrand(string $cardNumber): string
-{
-$number = preg_replace('/\D/', '', $cardNumber);
+    public function failure(Subscription $subscription)
+    {
+        if (!Auth::check() || $subscription->user_id !== Auth::id()) {
+            abort(403);
+        }
 
-if (preg_match('/^4/', $number)) {
-return 'Visa';
-} elseif (preg_match('/^5[1-5]/', $number)) {
-return 'Mastercard';
-} elseif (preg_match('/^3[47]/', $number)) {
-return 'American Express';
-}
+        return view('subscriptions.failure', compact('subscription'));
+    }
 
-return 'Outros';
-}
+    public function confirmPix(Subscription $subscription)
+    {
+        if (!Auth::check() || $subscription->user_id !== Auth::id()) {
+            abort(403);
+        }
+
+        if ($subscription->status !== 'pending') {
+            return redirect()->route('profile.index')
+                ->with('info', 'Esta assinatura já foi processada.');
+        }
+
+        // Verificar status no Mercado Pago
+        $paymentData = $subscription->payment_data;
+        if (!isset($paymentData['mp_payment_id'])) {
+            return back()->with('error', 'Dados de pagamento não encontrados.');
+        }
+
+        $payment = $this->mercadoPagoService->getPayment($paymentData['mp_payment_id']);
+
+        if (!$payment) {
+            return back()->with('error', 'Pagamento não encontrado.');
+        }
+
+        if ($payment->status === 'approved') {
+            $subscription->activate();
+            $subscription->update(['status' => 'active']);
+
+            ActivityLog::log(
+                'pix_payment_confirmed',
+                "Pagamento PIX confirmado para assinatura #{$subscription->id}",
+                Auth::user(),
+                ['subscription_id' => $subscription->id, 'mp_payment_id' => $payment->id]
+            );
+
+            return redirect()->route('subscription.success', $subscription)
+                ->with('success', 'Pagamento PIX confirmado com sucesso!');
+        }
+
+        return back()->with('info', 'Pagamento ainda não foi confirmado. Aguarde alguns minutos.');
+    }
 }

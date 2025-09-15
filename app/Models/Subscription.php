@@ -18,9 +18,13 @@ class Subscription extends Model
         'status',
         'starts_at',
         'expires_at',
+        'ends_at',
         'cancelled_at',
         'payment_reference',
         'payment_data',
+        'mercadopago_subscription_id',
+        'mercadopago_payment_id',
+
     ];
 
     protected function casts(): array
@@ -28,6 +32,7 @@ class Subscription extends Model
         return [
             'amount_paid' => 'decimal:2',
             'starts_at' => 'datetime',
+            'ends_at' => 'datetime',
             'expires_at' => 'datetime',
             'cancelled_at' => 'datetime',
             'payment_data' => 'array',

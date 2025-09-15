@@ -2,27 +2,6 @@
 
 @section('title', 'Checkout - VideoHub')
 
-@push('styles')
-    <style>
-        .mp-form-control {
-            background: rgba(255, 255, 255, 0.1);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            border-radius: 0.5rem;
-            color: white;
-            padding: 0.75rem 1rem;
-            width: 100%;
-        }
-        .mp-form-control:focus {
-            border-color: #8B5CF6;
-            box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.2);
-            outline: none;
-        }
-        .mp-form-control::placeholder {
-            color: rgba(147, 51, 234, 0.6);
-        }
-    </style>
-@endpush
-
 @section('content')
     <div class="max-w-2xl mx-auto px-4 py-8">
         <div class="bg-white/5 backdrop-blur-sm rounded-2xl p-8 border border-white/10">
@@ -71,63 +50,41 @@
                     </label>
 
                     <div id="creditCardForm" class="ml-8 space-y-3 mb-4">
-                        <!-- CPF -->
                         <input
                             type="text"
-                            name="cpf"
-                            id="cpf"
-                            placeholder="CPF (somente números)"
-                            maxlength="11"
-                            class="mp-form-control"
-                            required
-                        >
-
-                        <!-- Nome no Cartão -->
-                        <input
-                            type="text"
-                            name="card_holder_name"
-                            id="cardHolderName"
+                            name="card_name"
                             placeholder="Nome no cartão"
-                            class="mp-form-control"
+                            class="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-purple-300 focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 transition-all"
                             required
                         >
-
-                        <!-- Número do Cartão -->
                         <input
                             type="text"
                             name="card_number"
-                            id="cardNumber"
                             placeholder="Número do cartão"
                             maxlength="19"
-                            class="mp-form-control"
+                            class="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-purple-300 focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 transition-all"
+                            oninput="formatCardNumber(this)"
                             required
                         >
-
                         <div class="grid grid-cols-2 gap-3">
-                            <!-- Data de Validade -->
                             <input
                                 type="text"
                                 name="card_expiry"
-                                id="cardExpiry"
                                 placeholder="MM/AA"
                                 maxlength="5"
-                                class="mp-form-control"
+                                class="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-purple-300 focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 transition-all"
+                                oninput="formatExpiry(this)"
                                 required
                             >
-                            <!-- CVV -->
                             <input
                                 type="text"
                                 name="card_cvv"
-                                id="cardCvv"
                                 placeholder="CVV"
                                 maxlength="4"
-                                class="mp-form-control"
+                                class="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-purple-300 focus:border-purple-500 focus:ring-2 focus:ring-purple-500/20 transition-all"
                                 required
                             >
                         </div>
-
-                        <!-- Campo oculto para o token -->
-                        <input type="hidden" name="card_token" id="cardToken">
                     </div>
 
                     <!-- PIX -->
@@ -168,21 +125,7 @@
     </div>
 
     @push('scripts')
-        <!-- Mercado Pago SDK -->
-        <script src="https://sdk.mercadopago.com/js/v2"></script>
-
         <script>
-            // Inicializar Mercado Pago
-            const mp = new MercadoPago('{{ config('mercadopago.public_key') }}', {
-                locale: 'pt-BR'
-            });
-
-            // Máscaras de formatação
-            function formatCPF(input) {
-                let value = input.value.replace(/\D/g, '');
-                input.value = value.substring(0, 11);
-            }
-
             function formatCardNumber(input) {
                 let value = input.value.replace(/\s/g, '').replace(/[^0-9]/gi, '');
                 let formattedValue = value.match(/.{1,4}/g)?.join(' ') || '';
@@ -200,20 +143,13 @@
                 input.value = value;
             }
 
-            // Aplicar máscaras
-            document.getElementById('cpf').addEventListener('input', function() { formatCPF(this); });
-            document.getElementById('cardNumber').addEventListener('input', function() { formatCardNumber(this); });
-            document.getElementById('cardExpiry').addEventListener('input', function() { formatExpiry(this); });
-
             // Toggle credit card form
             document.addEventListener('change', function(e) {
                 if (e.target.name === 'payment_method') {
                     const creditCardForm = document.getElementById('creditCardForm');
                     if (e.target.value === 'credit_card') {
                         creditCardForm.style.display = 'block';
-                        creditCardForm.querySelectorAll('input').forEach(input => {
-                            if (input.name !== 'card_token') input.required = true;
-                        });
+                        creditCardForm.querySelectorAll('input').forEach(input => input.required = true);
                     } else {
                         creditCardForm.style.display = 'none';
                         creditCardForm.querySelectorAll('input').forEach(input => input.required = false);
@@ -222,9 +158,7 @@
             });
 
             // Form submission
-            document.getElementById('checkoutForm').addEventListener('submit', async function(e) {
-                e.preventDefault();
-
+            document.getElementById('checkoutForm').addEventListener('submit', function(e) {
                 const submitBtn = document.getElementById('submitBtn');
                 const submitText = submitBtn.querySelector('.submit-text');
                 const loadingText = submitBtn.querySelector('.loading-text');
@@ -232,46 +166,6 @@
                 submitBtn.disabled = true;
                 submitText.classList.add('hidden');
                 loadingText.classList.remove('hidden');
-
-                const paymentMethod = document.querySelector('input[name="payment_method"]:checked').value;
-
-                if (paymentMethod === 'credit_card') {
-                    try {
-                        // Criar token do cartão
-                        const cardNumber = document.getElementById('cardNumber').value.replace(/\s/g, '');
-                        const cardExpiry = document.getElementById('cardExpiry').value.split('/');
-                        const cardCvv = document.getElementById('cardCvv').value;
-                        const cardHolderName = document.getElementById('cardHolderName').value;
-
-                        if (!cardNumber || !cardExpiry[0] || !cardExpiry[1] || !cardCvv || !cardHolderName) {
-                            throw new Error('Preencha todos os campos do cartão');
-                        }
-
-                        const token = await mp.createCardToken({
-                            cardNumber: cardNumber,
-                            cardholderName: cardHolderName,
-                            cardExpirationMonth: cardExpiry[0],
-                            cardExpirationYear: '20' + cardExpiry[1],
-                            securityCode: cardCvv,
-                            identificationType: 'CPF',
-                            identificationNumber: document.getElementById('cpf').value
-                        });
-
-                        document.getElementById('cardToken').value = token.id;
-                        this.submit();
-
-                    } catch (error) {
-                        console.error('Error creating card token:', error);
-                        alert('Erro ao processar dados do cartão: ' + (error.message || 'Verifique os dados informados'));
-
-                        submitBtn.disabled = false;
-                        submitText.classList.remove('hidden');
-                        loadingText.classList.add('hidden');
-                    }
-                } else {
-                    // PIX - submete diretamente
-                    this.submit();
-                }
             });
         </script>
     @endpush

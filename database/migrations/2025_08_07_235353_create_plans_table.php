@@ -14,6 +14,7 @@ return new class extends Migration
             $table->text('description')->nullable();
             $table->decimal('price', 10, 2);
             $table->enum('billing_cycle', ['monthly', 'quarterly', 'yearly']);
+            $table->string('mercadopago_plan_id')->nullable()->comment('ID do plano no MP');
             $table->integer('duration_months');
             $table->json('features')->nullable();
             $table->boolean('is_popular')->default(false);

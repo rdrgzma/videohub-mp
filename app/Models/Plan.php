@@ -22,6 +22,7 @@ class Plan extends Model
         'is_popular',
         'is_active',
         'sort_order',
+        'mercadopago_plan_id'
     ];
 
     protected function casts(): array
